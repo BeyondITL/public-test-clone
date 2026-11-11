@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'none'; font-src 'none'; media-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Workbench | Creator Publishing Kit</title>
+  <meta name="description" content="Offline workbench. Prepare a transcript, check a Claude draft against it, edit the carousel and export PNG, PDF and copy. Nothing is uploaded.">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="core.js"></script>
+  <script defer src="samples.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#source-panel">Skip to the workbench</a>
+  <header class="topbar">
+    <p class="wordmark">Creator Publishing Kit <span>Workbench</span></p>
+    <p class="local">Runs in this page only. Nothing is uploaded.</p>
+  </header>
+  <main id="top">
+    <section class="intro">
+      <h1>One transcript in. A checked carousel, scripts and posts out.</h1>
+      <p>Prepare your source here, draft with Claude in your own account, then check the draft against the source, edit it and export. This page does the checking and the artwork. It does not generate text.</p>
+      <details class="help">
+        <summary>How to use this page</summary>
+        <ol>
+          <li>Load an example to see a finished set, or paste a transcript you have the rights to. SRT and VTT files keep their timecodes. Plain text has none.</li>
+          <li>Press <b>Prepare source</b>. Each passage gets an ID such as C001.</li>
+          <li>Press <b>Copy request for Claude</b> and paste it into Claude with one of the kit's skills installed. Claude returns JSON.</li>
+          <li>Paste that JSON under Draft and press <b>Validate</b>. The page checks that every cue ID exists and that reel times match the cited cues.</li>
+          <li>Read the draft against the source list. Beside the preview, switch between Slides, Reels and Posts to edit the text.</li>
+          <li>Tick the approval box, then download PNG slides, a PDF, the copy as Markdown, or the JSON. Each reel script and post also gets its own Copy button.</li>
+        </ol>
+        <p>What it cannot do: it does not watch video, clip video, post for you, or judge whether a paraphrase is true. That review is yours.</p>
+      </details>
+      <p id="guide" class="guide" hidden></p>
+    </section>
+
+    <div class="layout">
+      <div class="steps">
+        <section class="step" id="source-panel" aria-labelledby="h-source">
+          <h2 id="h-source"><span class="n">1</span> Source</h2>
+          <p class="hint">Use a transcript you own or have permission to reuse.</p>
+          <div class="examples">
+            <p id="examples-label">Start from a complete example</p>
+            <div id="sample-actions" class="row" role="group" aria-labelledby="examples-label"></div>
+          </div>
+          <div class="grid2">
+            <label class="field" for="brand">Brand name<input id="brand" type="text" maxlength="90" value="Your brand" autocomplete="off"></label>
+            <label class="field" for="audience">Who it is for<input id="audience" type="text" maxlength="160" value="Founders and educators" autocomplete="off"></label>
+            <label class="field" for="voice">Voice<input id="voice" type="text" maxlength="180" value="Clear, specific, helpful" autocomplete="off"></label>
+            <label class="field" for="cta">Call to action<input id="cta" type="text" maxlength="160" value="Get the checklist" autocomplete="off"></label>
+          </div>
+          <label class="field" for="source-text">Transcript (SRT, VTT or plain text)</label>
+          <textarea id="source-text" rows="7" spellcheck="false" placeholder="Paste your transcript here, or load a file."></textarea>
+          <label class="check"><input type="checkbox" id="permission"><span>I own this material or have permission to use it.</span></label>
+          <div class="row">
+            <button id="source-file-button" class="button" type="button">Load .srt, .vtt or .txt</button>
+            <input type="file" accept=".srt,.vtt,.txt,text/plain,text/vtt" id="source-file" class="file-input" tabindex="-1" aria-hidden="true">
+            <button id="prepare" class="button primary" type="button">Prepare source</button>
+          </div>
+          <div id="source-status" class="note" role="status" aria-live="polite">Load an example or paste a transcript to begin.</div>
+        </section>
+
+        <section class="step" id="claude-panel" aria-labelledby="h-draft">
+          <h2 id="h-draft"><span class="n">2</span> Draft</h2>
+          <p class="hint">Claude writes the draft in your own account, using one of the kit's skills. Copy the request, paste it into Claude, then bring the JSON back here.</p>
+          <div class="row">
+            <button id="copy-instructions" type="button" class="button" disabled>Copy request for Claude</button>
+            <button id="download-pack" type="button" class="button" disabled>Download source pack</button>
+          </div>
+          <label class="field" for="campaign-json">Draft JSON from Claude</label>
+          <textarea id="campaign-json" rows="9" spellcheck="false" placeholder="Paste the JSON here, or load a file."></textarea>
+          <div class="row">
+            <button id="campaign-file-button" class="button" type="button">Load .json</button>
+            <input id="campaign-file" type="file" accept=".json,application/json" class="file-input" tabindex="-1" aria-hidden="true">
+            <button id="validate" class="button primary" type="button">Validate</button>
+          </div>
+          <div id="validation-status" class="note" role="status" aria-live="polite">No draft checked yet.</div>
+        </section>
+
+        <section class="step" id="review-panel" aria-labelledby="h-review">
+          <h2 id="h-review"><span class="n">3</span> Review and export</h2>
+          <p class="hint">These are the passages the draft is allowed to cite. A valid ID shows where a claim came from. It does not show the claim is accurate, so read each one.</p>
+          <div id="evidence" class="evidence" tabindex="0" role="region" aria-label="Source cues"></div>
+          <label class="check approval"><input type="checkbox" id="approval" disabled><span>I have read this draft against the source and checked claims, rights, timecodes and suitability for publishing.</span></label>
+          <p id="export-hint" class="hint">Exports unlock when the draft is valid and you have ticked the approval box.</p>
+          <div class="row">
+            <button class="button" id="png-all" type="button" disabled>All slides as PNG</button>
+            <button class="button" id="print-pdf" type="button" disabled>Save as PDF</button>
+            <button class="button" id="export-md" type="button" disabled>Copy and scripts (.md)</button>
+            <button class="button" id="export-json" type="button" disabled>Draft (.json)</button>
+          </div>
+        </section>
+      </div>
+
+      <aside class="preview" aria-labelledby="h-preview">
+        <div class="preview-head">
+          <h2 id="h-preview">Carousel</h2>
+          <span id="slide-count">No draft loaded</span>
+        </div>
+        <div class="backing">
+          <canvas id="slide" width="1080" height="1350" role="img" aria-labelledby="h-preview" aria-describedby="slide-text"></canvas>
+        </div>
+        <p id="slide-text" class="sr" aria-live="polite"></p>
+        <div class="pager">
+          <button type="button" id="prev" class="button" disabled>Previous</button>
+          <span id="slide-position"></span>
+          <button type="button" id="next" class="button" disabled>Next</button>
+        </div>
+        <p id="fit-warning" class="note error" hidden>This slide has more text than fits. The end is cut off. Shorten the headline or body.</p>
+        <div class="switch" role="group" aria-label="What to edit">
+          <button type="button" class="seg" id="mode-slides" aria-pressed="true" aria-controls="edit-slides">Slides</button>
+          <button type="button" class="seg" id="mode-reels" aria-pressed="false" aria-controls="edit-reels">Reels</button>
+          <button type="button" class="seg" id="mode-posts" aria-pressed="false" aria-controls="edit-posts">Posts</button>
+        </div>
+        <fieldset class="editor" id="edit-slides">
+          <legend>Edit this slide</legend>
+          <label class="field" for="edit-eyebrow">Label<input id="edit-eyebrow" type="text" maxlength="45" autocomplete="off" disabled></label>
+          <label class="field" for="edit-headline">Headline<input id="edit-headline" type="text" maxlength="100" autocomplete="off" disabled></label>
+          <label class="field" for="edit-body">Body<textarea id="edit-body" rows="4" maxlength="360" disabled></textarea></label>
+          <p id="slide-error" class="note error" hidden></p>
+          <p class="hint">Changes clear the approval, because the draft is no longer the one you approved.</p>
+        </fieldset>
+        <fieldset class="editor" id="edit-reels" hidden>
+          <legend>Edit reel scripts</legend>
+          <div id="reel-list" class="items"></div>
+          <p class="hint">Each reel's source time comes from the cues it cites, so it is shown but cannot be typed. Changes clear the approval.</p>
+        </fieldset>
+        <fieldset class="editor" id="edit-posts" hidden>
+          <legend>Edit posts</legend>
+          <div id="post-list" class="items"></div>
+          <p class="hint">Changes clear the approval. Copy buttons work once the draft is approved.</p>
+        </fieldset>
+        <p id="copy-status" class="note" role="status" aria-live="polite" hidden></p>
+        <div class="grid2">
+          <label class="field" for="theme">Colours<select id="theme"><option value="sheet">White and cobalt</option><option value="cobalt">Cobalt</option><option value="blush">Blush and brick</option></select></label>
+          <label class="check"><input type="checkbox" id="show-sources"><span>Print source cue IDs on the slides</span></label>
+        </div>
+        <button type="button" id="png" class="button primary wide" disabled>Download this slide as PNG</button>
+        <p class="hint">Slides are 1080 by 1350 pixels, drawn in this page. The PDF uses your browser's print dialog: choose Save as PDF.</p>
+      </aside>
+    </div>
+  </main>
+  <footer>
+    <p>Creator Publishing Kit is an independent product. It is not affiliated with or endorsed by Anthropic.</p>
+    <p>This page sets no cookies, stores nothing and makes no network requests.</p>
+  </footer>
+  <div id="print-deck" aria-hidden="true"></div>
+</body>
+</html>
