@@ -43,19 +43,29 @@ h1, h2 { font-family: var(--font-display); text-wrap: balance; }
 .wordmark span { font-family: var(--font); font-weight: 500; color: var(--ink-2); }
 .local { color: var(--ink-2); font-size: 14px; }
 
-.intro { padding: var(--s-10) var(--gutter) var(--s-8); max-width: 980px; }
-.intro h1 { font-size: clamp(32px, 5.4vw, 60px); line-height: 1; font-weight: 800; letter-spacing: -0.03em; max-width: 17ch; }
-.intro > p { margin-top: var(--s-5); max-width: 68ch; font-size: 18px; color: var(--ink-2); }
+.intro { display: grid; gap: var(--s-4); }
+.intro h1 { font-size: clamp(30px, 3.6vw, 48px); line-height: 1.02; font-weight: 800; letter-spacing: -0.03em; max-width: 18ch; }
+.intro > p { max-width: 62ch; font-size: 17px; color: var(--ink-2); }
 .help { margin-top: var(--s-5); max-width: 72ch; }
 .help summary { cursor: pointer; font-weight: 700; color: var(--cobalt); padding: var(--s-2) 0; width: fit-content; }
 .help ol { padding-left: var(--s-6); margin-top: var(--s-2); display: grid; gap: var(--s-2); }
 .help p { margin-top: var(--s-3); color: var(--ink-2); }
 
-.layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); gap: var(--s-8); padding: var(--s-8) var(--gutter) var(--s-12); background: var(--backing); align-items: start; }
-.steps { display: grid; gap: var(--s-6); min-width: 0; }
-.step, .preview { background: var(--sheet); border-radius: var(--r-piece); box-shadow: var(--shadow-piece); padding: var(--s-6); display: grid; gap: var(--s-4); min-width: 0; }
-.preview { position: sticky; top: var(--s-4); }
-.step h2, .preview h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; display: flex; align-items: center; gap: var(--s-3); }
+/* Result first: the carousel on the left (on top on a phone), everything else beside it. */
+.bench { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-8) var(--s-10); padding: var(--s-6) var(--gutter) var(--s-12); background: var(--backing); align-items: start; }
+.stage { position: sticky; top: var(--s-4); display: grid; gap: var(--s-3); justify-items: center; min-width: 0; }
+.stage > * { width: 100%; max-width: 620px; }
+.side { display: grid; gap: var(--s-6); min-width: 0; }
+.intro, .step, .look, .words { background: var(--sheet); border-radius: var(--r-piece); box-shadow: var(--shadow-piece); padding: var(--s-6); display: grid; gap: var(--s-4); min-width: 0; }
+.flow { display: grid; gap: var(--s-6); }
+.step h2, .look h2, .words h2 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; display: flex; align-items: center; gap: var(--s-3); }
+.step h2:focus { outline: none; }
+.step h2:focus-visible { outline: 3px solid var(--cobalt); outline-offset: 4px; }
+.caption { color: var(--ink-2); font-size: 15px; text-align: center; }
+.step-nav { display: none; }
+.floating { position: fixed; z-index: 2; left: 50%; bottom: var(--s-4); transform: translateX(-50%); box-shadow: var(--shadow-piece); }
+details.data summary { cursor: pointer; font-weight: 700; color: var(--cobalt); padding: var(--s-2) 0; min-height: 44px; display: flex; align-items: center; }
+details.data[open] { display: grid; gap: var(--s-3); }
 .step .n { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--ink); color: var(--sheet); font-size: 16px; }
 .hint { color: var(--ink-2); font-size: 15px; max-width: 68ch; }
 
@@ -86,8 +96,9 @@ input:disabled, textarea:disabled { background: var(--backing); border-color: va
 .note.error { border-color: var(--tomato); background: var(--tomato-tint); color: var(--tomato-ink); font-weight: 600; }
 [hidden] { display: none !important; }
 
-.examples { display: grid; gap: var(--s-2); padding: var(--s-4); background: var(--backing); border-radius: var(--r-control); }
-.examples p { font-weight: 700; font-size: 15px; }
+.examples { display: grid; gap: var(--s-2); justify-items: center; }
+.examples p { font-weight: 700; font-size: 15px; color: var(--ink-2); }
+.examples .row { justify-content: center; }
 
 .evidence { max-height: 300px; overflow: auto; border: 1.5px solid var(--line); border-radius: var(--r-control); }
 .evidence-item { display: grid; grid-template-columns: 56px 64px minmax(0, 1fr); gap: var(--s-3); padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); font-size: 15px; }
@@ -98,10 +109,9 @@ input:disabled, textarea:disabled { background: var(--backing); border-color: va
 .evidence-item p { overflow-wrap: anywhere; }
 .empty { padding: var(--s-4); color: var(--ink-2); }
 
-.preview-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s-4); }
-.preview-head span { color: var(--ink-2); font-size: 15px; }
-.backing { background: var(--backing); padding: var(--s-5); border-radius: var(--r-control); }
-#slide { display: block; width: 100%; height: auto; border-radius: 6px; box-shadow: 0 0 0 5px var(--sheet), var(--shadow-piece); }
+.backing { display: grid; justify-items: center; }
+/* The slide keeps its shape and always fits the screen height, in either size. Sideways drags turn the page. */
+#slide { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(100vh - 270px); max-height: calc(100svh - 270px); border-radius: 6px; box-shadow: var(--shadow-piece); touch-action: pan-y; cursor: grab; }
 .pager { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); }
 .pager span { font-weight: 700; font-variant-numeric: tabular-nums; }
 .editor { border: 1.5px solid var(--line); border-radius: var(--r-control); padding: var(--s-4); display: grid; gap: var(--s-3); min-width: 0; }
@@ -134,12 +144,23 @@ footer { padding: var(--s-6) var(--gutter); color: var(--ink-2); font-size: 14px
 #print-deck { display: none; }
 
 @media (max-width: 960px) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .preview { position: static; }
+  .bench { grid-template-columns: minmax(0, 1fr); padding-top: var(--s-3); gap: var(--s-6); }
+  .stage { position: static; }
+  #slide { max-height: none; }
+  /* One step per screen, with Back and Next. */
+  .flow[data-step="1"] #step-2, .flow[data-step="1"] #step-3,
+  .flow[data-step="2"] #step-1, .flow[data-step="2"] #step-3,
+  .flow[data-step="3"] #step-1, .flow[data-step="3"] #step-2 { display: none; }
+  .step-nav { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); position: sticky; bottom: 0; background: var(--backing); padding: var(--s-3) 0; }
+  .step-nav span { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .step-nav [hidden] { display: inline-flex !important; visibility: hidden; }
+  /* Above the Back and Next bar, never on top of it. */
+  .floating { bottom: 84px; }
 }
 @media (max-width: 520px) {
+  .topbar .local { display: none; }
   .grid2 { grid-template-columns: minmax(0, 1fr); }
-  .step, .preview { padding: var(--s-4); }
+  .intro, .step, .look, .words { padding: var(--s-4); }
   .evidence-item { grid-template-columns: 48px minmax(0, 1fr); }
   .evidence-item p { grid-column: 1 / -1; }
   .row .button { flex: 1 1 100%; }
@@ -147,6 +168,7 @@ footer { padding: var(--s-6) var(--gutter); color: var(--ink-2); font-size: 14px
 @media (prefers-reduced-motion: no-preference) { .button { transition: background-color 120ms; } }
 
 @page { size: 1080px 1350px; margin: 0; }
+@page story { size: 1080px 1920px; margin: 0; }
 @media print {
   html, body { background: var(--sheet); }
   body > *:not(#print-deck) { display: none !important; }
@@ -154,6 +176,8 @@ footer { padding: var(--s-6) var(--gutter); color: var(--ink-2); font-size: 14px
   .print-slide { position: relative; width: 1080px; height: 1350px; overflow: hidden; break-after: page; page-break-after: always; }
   .print-slide:last-child { break-after: auto; page-break-after: auto; }
   .print-slide canvas { display: block; width: 1080px; height: 1350px; }
+  .print-slide.story { page: story; height: 1920px; }
+  .print-slide.story canvas { height: 1920px; }
   /* Selectable text placed over the painted lines. Transparent so the artwork is what you see. */
   .print-text { position: absolute; inset: 0; }
   .print-text span { position: absolute; white-space: pre; line-height: 1; color: transparent; font-family: var(--font); }

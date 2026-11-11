@@ -1,19 +1,13 @@
 /* Creator Publishing Kit workbench. Original implementation.
    No network requests, cookies, storage or analytics. Everything runs in this page. */
 (function(){'use strict';
-const $=id=>document.getElementById(id), core=window.CPKCore;
-const W=1080,H=1350,M=84;
-const SAMPLE_LABELS={'founder-webinar':'Founder webinar','educator-lesson':'Art lesson','product-demo':'Product demo'};
-// Each theme is a full set of roles so no colour is ever picked ad hoc in the renderer.
-// Contrast of ink on bg and of soft on bg is at least 4.5:1 in every theme (see tests/contrast check).
-const THEMES={
-  sheet:{bg:'#FFFFFF',ink:'#0D1117',soft:'#4A5362',accent:'#1F45E0',mark:'#EF4329',panel:'#E8ECF2',onAccent:'#FFFFFF'},
-  cobalt:{bg:'#1F45E0',ink:'#FFFFFF',soft:'#DCE3FF',accent:'#FFFFFF',mark:'#FFC9BF',panel:'#1736B4',onAccent:'#1F45E0'},
-  blush:{bg:'#FDEDE9',ink:'#0D1117',soft:'#4A5362',accent:'#A82412',mark:'#1F45E0',panel:'#FFFFFF',onAccent:'#FFFFFF'}
-};
-// Device fonts only: the kit ships no font files. Heavier weight carries the display voice.
-const SANS='"Helvetica Neue", Helvetica, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif';
+const $=id=>document.getElementById(id), core=window.CPKCore, S=window.CPKSlides;
+// Examples in the order they are offered. The first one this edition has is shown on load.
+const EXAMPLES={'educator-lesson':{label:'Art lesson',from:'a fictional art lesson'},'founder-webinar':{label:'Founder webinar',from:'a fictional founder webinar'},'product-demo':{label:'Product demo',from:'a fictional product demo'}};
+const demos=window.CPK_DEMO||{};
+const firstExample=Object.keys(EXAMPLES).find(k=>demos[k])||null;
 let pack=null,campaign=null,campaignValid=false,slideIndex=0,lastErrors=[],editorsFor=undefined;
+let exampleKey=null,layouts=[],layoutsFor=undefined,logo=null,photo=null,step=1,carouselSeen=true,lastRuns=null;
 
 function setStatus(id,txt,kind){const el=$(id);el.textContent=txt;el.className='note'+(kind?' '+kind:'');el.dataset.state=kind||'info';}
 function download(filename,data,type){
@@ -23,139 +17,60 @@ function download(filename,data,type){
   setTimeout(()=>URL.revokeObjectURL(url),2000);
 }
 
-/* ---------- slide renderer ---------- */
-// Wraps text to a width, breaking overlong tokens so nothing paints outside the safe area.
-function wrap(ctx,text,maxWidth){
-  const lines=[];let current='';
-  for(const token of String(text).split(/\s+/).filter(Boolean)){
-    let rest=token;
-    while(rest){
-      const trial=current?current+' '+rest:rest;
-      if(ctx.measureText(trial).width<=maxWidth){current=trial;rest='';break;}
-      if(current){lines.push(current);current='';continue;}
-      let n=1;
-      while(n<rest.length&&ctx.measureText(rest.slice(0,n+1)).width<=maxWidth)n++;
-      lines.push(rest.slice(0,n));rest=rest.slice(n);
-    }
-  }
-  if(current)lines.push(current);
-  return lines;
+/* ---------- what the carousel shows ---------- */
+// The customer's draft when there is one; otherwise the first example, marked as an example.
+function view(){
+  if(campaign&&Array.isArray(campaign.slides)&&campaign.slides.length)
+    return {slides:campaign.slides,pack,brand:pack&&pack.brand?pack.brand.name:$('brand').value,cta:pack&&pack.brand?pack.brand.cta:$('cta').value,example:exampleKey,ghost:false};
+  if(firstExample){const d=demos[firstExample];return {slides:d.campaign.slides,pack:d.pack,brand:d.pack.brand.name,cta:d.pack.brand.cta,example:firstExample,ghost:true};}
+  return {slides:[{eyebrow:'Preview',headline:'Your carousel appears here.',body:'Prepare a source and check Claude\'s reply to see it.',evidence_ids:[]}],pack:null,brand:$('brand').value,cta:'',example:null,ghost:true};
 }
-function font(weight,size){return weight+' '+size+'px '+SANS;}
-// Picks the largest size at which the text fits the given line budget.
-function fit(ctx,text,maxWidth,maxLines,sizes,weight){
-  let lines=[],size=sizes[sizes.length-1];
-  for(const s of sizes){ctx.font=font(weight,s);lines=wrap(ctx,text,maxWidth);size=s;if(lines.length<=maxLines)break;}
-  let clipped=false;
-  if(lines.length>maxLines){
-    lines=lines.slice(0,maxLines);clipped=true;
-    let last=lines[maxLines-1];
-    while(last.length&&ctx.measureText(last+'...').width>maxWidth)last=last.slice(0,-1);
-    lines[maxLines-1]=last+'...';
-  }
-  return {lines,size,clipped};
+function renderOptions(v,i){
+  if(layoutsFor!==campaign){layouts=[];layoutsFor=campaign;}
+  return {palette:S.palette($('theme').value,$('brand-colour').value),size:$('size').value,layout:v.ghost?null:layouts[i]||null,
+    slides:v.slides,pack:v.pack,brand:v.brand,cta:v.cta,showSources:$('show-sources').checked,logo,photo};
 }
-// Draws lines and records each as a text run. The runs drive the selectable text layer
-// in the PDF and the text alternative of the preview, so they always match the artwork.
-function put(ctx,runs,lines,x,y,size,weight,color,lineHeight,align){
-  ctx.font=font(weight,size);ctx.fillStyle=color;ctx.textBaseline='alphabetic';
-  lines.forEach((line,i)=>{
-    const width=ctx.measureText(line).width,left=align==='right'?x-width:x,base=y+i*lineHeight;
-    ctx.fillText(line,left,base);
-    runs.push({text:line,x:Math.round(left),y:Math.round(base),size,weight,width:Math.round(width)});
-  });
-  return y+lines.length*lineHeight;
+function captionFor(v){
+  if(v.ghost&&v.example)return 'This is an example made from '+EXAMPLES[v.example].from+'. Your own carousel appears here once Claude\'s reply passes the check.';
+  if(v.example)return 'An example made from '+EXAMPLES[v.example].from+'. It is not a customer result.';
+  if(v.ghost)return 'Nothing to show yet.';
+  return 'Your carousel, drawn from your source. Read every slide before you approve it.';
 }
-function renderSlide(canvas,slide,i,total,opts){
-  const ctx=canvas.getContext('2d');const runs=[];
-  if(!ctx)return runs;
-  const o=opts||{};
-  const base=THEMES[o.theme]||THEMES.sheet;
-  const last=total>1&&i===total-1,first=i===0;
-  // The closing slide inverts to the accent so the call to action reads as the end of the set.
-  const t=last?{bg:base.accent,ink:base.onAccent,soft:base.onAccent,accent:base.onAccent,mark:base.onAccent,panel:base.bg,onAccent:base.accent}:base;
-  canvas.width=W;canvas.height=H;
-  ctx.fillStyle=t.bg;ctx.fillRect(0,0,W,H);
-  const inner=W-M*2;
-  const label=String(slide.eyebrow||'').trim(),head=String(slide.headline||'').trim(),body=String(slide.body||'').trim();
-  // Running head: the slide's label on the left, its place in the set on the right.
-  // The label names the section the way a running head does; it is not a tag stacked on the headline.
-  const count=(i+1)+' / '+total;
-  ctx.font=font(700,30);const countWidth=ctx.measureText(count).width;
-  if(label)put(ctx,runs,fit(ctx,label,inner-countWidth-40,1,[30],700).lines,M,118,30,700,t.soft,36);
-  put(ctx,runs,[count],W-M,118,30,700,t.soft,36,'right');
-  // Foot: whose carousel this is, and optionally where the slide's claims come from.
-  const footBase=H-84;
-  const brand=String(o.brand||'Your brand').slice(0,40);
-  put(ctx,runs,fit(ctx,brand,inner*0.55,1,[30],700).lines,M,footBase,30,700,t.ink,36);
-  if(o.showSources&&Array.isArray(slide.evidence_ids)&&slide.evidence_ids.length){
-    const src=fit(ctx,'Source cues: '+slide.evidence_ids.join(', '),inner*0.42,1,[24],500);
-    put(ctx,runs,src.lines,W-M,footBase,24,500,t.soft,30,'right');
-  }
-  // Headline and body are fitted together: the headline steps down a size until the body
-  // also fits above the foot of the slide. Text is never allowed to run off the artwork.
-  // If the closing headline already says the call to action, it is not drawn a second time.
-  const cta=last&&o.cta&&!core.sameWords(head,o.cta)?String(o.cta):'';
-  const top=210, footTop=H-170, reserve=cta?140:0, gap=96;
-  const headSizes=first?[148,132,116,100,88,76,66]:[124,110,96,84,74,64];
-  let h,hl,b,bl,headEnd,clipped=false;
-  for(let k=0;k<headSizes.length;k++){
-    h=fit(ctx,head,inner,first?5:4,[headSizes[k]],800);
-    hl=Math.round(h.size*1.0);
-    headEnd=top+h.size+(h.lines.length-1)*hl;
-    const room=footTop-reserve-(headEnd+gap);
-    b=null;
-    for(const bs of [46,42,38,34]){
-      const candidate=fit(ctx,body,inner,99,[bs],500);
-      const lh=Math.round(bs*1.38);
-      if(candidate.lines.length*lh<=room){b=candidate;bl=lh;break;}
-    }
-    if(b&&!h.clipped)break;
-    if(k===headSizes.length-1){
-      clipped=h.clipped;
-      if(!b){bl=Math.round(34*1.38);b=fit(ctx,body,inner,Math.max(1,Math.floor(room/bl)),[34],500);clipped=clipped||b.clipped;}
-    }
-  }
-  put(ctx,runs,h.lines,M,top+h.size,h.size,800,t.ink,hl);
-  // Body sits at the foot so every slide in a set shares one baseline grid, whatever the headline length.
-  const bodyHeight=b.lines.length*bl;
-  const by=Math.max(headEnd+gap+b.size,footTop-reserve-bodyHeight+b.size);
-  // One cut mark above the body: the place where this piece was cut from the source.
-  ctx.fillStyle=t.mark;ctx.fillRect(M,by-b.size-34,132,12);
-  put(ctx,runs,b.lines,M,by,b.size,500,t.ink,bl);
-  if(cta){
-    const c=fit(ctx,cta,inner-72,1,[40,36,32,28],700);
-    ctx.font=font(700,c.size);const cw=ctx.measureText(c.lines[0]).width+72;
-    ctx.fillStyle=t.ink;ctx.fillRect(M,footTop-112,cw,88);
-    put(ctx,runs,c.lines,M+36,footTop-54,c.size,700,t.bg,44);
-  }
-  runs.clipped=clipped;
-  return runs;
-}
-function renderOptions(){return {theme:$('theme').value,brand:pack&&pack.brand?pack.brand.name:$('brand').value,cta:pack&&pack.brand?pack.brand.cta:$('cta').value,showSources:$('show-sources').checked};}
 
 /* ---------- state and UI ---------- */
 function exportsAllowed(){return Boolean(campaign&&campaignValid&&$('approval').checked);}
 function refreshPreview(){
-  const count=campaign&&Array.isArray(campaign.slides)?campaign.slides.length:0;
-  $('slide-count').textContent=count?count+' slides':'No draft loaded';
-  $('prev').disabled=!count||slideIndex===0;$('next').disabled=!count||slideIndex>=count-1;
-  $('slide-position').textContent=count?'Slide '+(slideIndex+1)+' of '+count:'';
-  const slide=count?campaign.slides[slideIndex]:{eyebrow:'Example layout',headline:'Load an example or validate a draft to see your carousel here.',body:'This placeholder is not exported. Nothing leaves this page.',evidence_ids:[]};
-  const runs=renderSlide($('slide'),slide,count?slideIndex:0,count||1,renderOptions());
-  // Text alternative for the canvas, rebuilt from the same runs that were painted.
-  $('slide-text').textContent=(count?'Slide '+(slideIndex+1)+' of '+count+'. ':'Placeholder. ')+[slide.eyebrow,slide.headline,slide.body].filter(Boolean).join('. ');
-  $('fit-warning').hidden=!(count&&runs.clipped);
-  const editing=Boolean(count);
+  const v=view(),count=v.slides.length;
+  slideIndex=Math.max(0,Math.min(slideIndex,count-1));
+  $('prev').disabled=slideIndex===0;$('next').disabled=slideIndex>=count-1;
+  $('slide-position').textContent=(slideIndex+1)+' of '+count;
+  const slide=v.slides[slideIndex],opts=renderOptions(v,slideIndex);
+  const runs=S.renderSlide($('slide'),slide,slideIndex,count,opts);lastRuns=runs;
+  $('slide').classList.toggle('story',opts.size==='story');
+  // Text alternative for the canvas, built from the slide as painted.
+  const layoutName=(S.LAYOUTS.find(l=>l.id===runs.layout)||{}).label;
+  $('slide-text').textContent=(v.ghost?'Example. ':'')+'Slide '+(slideIndex+1)+' of '+count+', '+layoutName+' layout. '+[slide.eyebrow,slide.headline,slide.body].filter(Boolean).join('. ');
+  $('fit-warning').hidden=!runs.clipped;
+  $('stage-caption').textContent=captionFor(v);
+  // Layout choices for this slide. Ones it cannot honestly use are listed but switched off, with the reason below.
+  const sel=$('slide-layout'),opts2=S.layoutOptions(slide,slideIndex,count,v.slides,v.pack);
+  const SHORT={step:'needs numbered labels',quote:'needs words copied exactly from a cited cue',checklist:'needs two to four short sentences',closing:'last slide only'};
+  sel.replaceChildren(...opts2.map(o=>{const op=document.createElement('option');op.value=o.id;op.textContent=o.allowed?o.label:o.label+': '+SHORT[o.id];op.disabled=!o.allowed;return op;}));
+  sel.value=runs.layout;sel.disabled=v.ghost;
+  $('layout-note').textContent=v.ghost?'Layouts can be changed once a draft is loaded.':(runs.fallback?'Shown as Statement. '+runs.fallback:'');
+  $('layout-note').hidden=!$('layout-note').textContent;
+  const editing=Boolean(campaign&&Array.isArray(campaign.slides)&&campaign.slides.length);
   for(const id of ['edit-eyebrow','edit-headline','edit-body'])$(id).disabled=!editing;
-  if(editing&&document.activeElement&&!['edit-eyebrow','edit-headline','edit-body'].includes(document.activeElement.id)){
+  if(editing&&!['edit-eyebrow','edit-headline','edit-body'].includes(document.activeElement&&document.activeElement.id)){
     $('edit-eyebrow').value=slide.eyebrow||'';$('edit-headline').value=slide.headline||'';$('edit-body').value=slide.body||'';
   }
   if(!editing){$('edit-eyebrow').value='';$('edit-headline').value='';$('edit-body').value='';}
   showErrors($('slide-error'),editing?'Slide '+(slideIndex+1):null);
   if(editorsFor!==campaign)buildItemEditors();
 }
-// Errors for one slide, reel or post, shown next to the fields that caused them.
+function go(delta){slideIndex+=delta;refreshPreview();}
+// When the carousel changes out of sight, offer a way straight back to it.
+function revealCarousel(){if(!carouselSeen)$('see-carousel').hidden=false;}
 function showErrors(el,label){
   const own=label?lastErrors.filter(e=>new RegExp('^'+label+'(?![0-9])').test(e)):[];
   el.textContent=own.join('\n');el.hidden=!own.length;
@@ -174,7 +89,7 @@ function buildItemEditors(){
   for(const [kind,k] of Object.entries(KINDS)){
     const box=$(k.box);box.replaceChildren();
     const items=campaign&&Array.isArray(campaign[k.list])?campaign[k.list]:[];
-    if(!items.length){const p=document.createElement('p');p.className='empty';p.textContent=campaign?'This draft has no '+k.list+'.':'Load an example or validate a draft to edit its '+k.list+'.';box.appendChild(p);continue;}
+    if(!items.length){const p=document.createElement('p');p.className='empty';p.textContent=campaign?'This draft has no '+k.list+'.':'Load an example or check a reply from Claude to edit its '+k.list+'.';box.appendChild(p);continue;}
     items.forEach((item,i)=>{
       const id=kind+'-'+(i+1),wrap=document.createElement('div');wrap.className='item';wrap.id=id;
       const h=document.createElement('h3');h.textContent=k.name+' '+(i+1);wrap.appendChild(h);
@@ -205,7 +120,7 @@ function editItem(kind,i,key,value){
   list[i][key]=value;
   $('campaign-json').value=JSON.stringify(campaign,null,2);
   const keep=slideIndex;
-  applyValidation(campaign,'Edit saved and structure check passed. Approval was cleared because the draft changed.');
+  applyValidation(campaign,'Edit saved and the draft still passes the check. Approval was cleared because the draft changed.');
   slideIndex=keep;refreshPreview();showItemErrors();
 }
 // Copies text, or saves it as a file where the browser refuses clipboard access.
@@ -247,7 +162,7 @@ function listEvidence(){
 function applyValidation(doc,okMessage){
   const result=core.validateCampaign(doc,pack);
   campaign=doc;campaignValid=result.ok;lastErrors=result.errors;$('approval').checked=false;
-  if(!result.ok){setStatus('validation-status','Not valid yet. Nothing can be exported until these are fixed:\n'+result.errors.slice(0,12).join('\n'),'error');}
+  if(!result.ok){setStatus('validation-status','Not ready yet. Nothing can be exported until these are fixed:\n'+result.errors.slice(0,12).join('\n'),'error');}
   else{
     const review=result.warnings.filter(w=>!/^Machine checks/.test(w));
     setStatus('validation-status',okMessage+' '+doc.slides.length+' slides, '+doc.reels.length+' reels, '+doc.posts.length+' posts. This checks cue IDs and time bounds only. Read every claim against the source before you approve.'+(review.length?'\nReview notes:\n'+review.join('\n'):''),'success');
@@ -262,34 +177,72 @@ function prepare(){
     pack=core.makePack($('source-text').value,{source_label:'Customer-supplied transcript',permission_confirmed:true,brand_name:$('brand').value,audience:$('audience').value,voice:$('voice').value,cta:$('cta').value});
     $('download-pack').disabled=false;$('copy-instructions').disabled=false;listEvidence();
     const same=previous===pack.source_id&&$('campaign-json').value.trim();
-    campaign=null;campaignValid=false;$('approval').checked=false;slideIndex=0;
-    if(!same)$('campaign-json').value='';
+    campaign=null;campaignValid=false;$('approval').checked=false;slideIndex=0;exampleKey=null;
+    if(!same){$('campaign-json').value='';}
     setExports();
     setStatus('source-status',pack.cues.length+' cues prepared ('+(pack.kind==='timecoded'?'timecodes kept':'no timecodes: none will be invented')+'). Source ID '+pack.source_id+'.','success');
-    setStatus('validation-status',same?'Source prepared again with the same text. Validate the draft to continue.':'Paste the JSON that Claude returns, then validate it.');
+    setStatus('validation-status',same?'Source prepared again with the same text. Check the draft again to continue.':'Copy the request for Claude, then paste Claude\'s reply here.');
   }catch(e){setStatus('source-status',e.message,'error');}
 }
-function validate(){
+// Checks Claude's reply (or, if the reply box is empty, the draft data). Extra words or a code fence around the draft are ignored.
+function validate(useData){
   if(!pack){setStatus('validation-status','Prepare a source or load an example first.','error');return;}
-  const text=$('campaign-json').value;
-  if(text.length>400000){campaign=null;campaignValid=false;setExports();setStatus('validation-status','This draft is larger than the 400,000 character limit.','error');return;}
-  let doc;
-  try{doc=JSON.parse(text);}catch(e){campaign=null;campaignValid=false;setExports();setStatus('validation-status','This is not valid JSON, so nothing was loaded. '+e.message,'error');return;}
-  slideIndex=0;
-  if(!doc||typeof doc!=='object'||Array.isArray(doc)||!Array.isArray(doc.slides)){campaign=null;campaignValid=false;setExports();setStatus('validation-status','Expected a campaign object with a slides list. Nothing was loaded.','error');return;}
-  applyValidation(doc,'Structure check passed.');
+  const reply=useData?'':$('reply').value;
+  const text=reply.trim()?reply:$('campaign-json').value;
+  const fail=msg=>{campaign=null;campaignValid=false;setExports();setStatus('validation-status',msg,'error');};
+  if(!text.trim())return fail('Paste Claude\'s reply first.');
+  if(text.length>400000)return fail('This reply is larger than the 400,000 character limit.');
+  const found=core.extractDraft(text);
+  if(!found.ok)return fail(found.error);
+  const doc=found.value;
+  if(!Array.isArray(doc.slides))return fail('The reply has no slides in it, so nothing was loaded. Ask Claude to answer with the kit\'s skill.');
+  slideIndex=0;exampleKey=null;
+  $('campaign-json').value=JSON.stringify(doc,null,2);
+  if(reply.trim())$('reply').value='';
+  applyValidation(doc,found.extra?'Reply checked. The words around the draft were set aside.':'Reply checked.');
+  revealCarousel();
 }
 function sample(name){
-  const data=window.CPK_DEMO&&window.CPK_DEMO[name];
+  const data=demos[name];
   if(!data){setStatus('source-status','That example is not part of this edition.','error');return;}
-  pack=structuredClone(data.pack);
+  pack=structuredClone(data.pack);exampleKey=name;
   $('brand').value=pack.brand.name;$('audience').value=pack.brand.audience;$('voice').value=pack.brand.voice;$('cta').value=pack.brand.cta;
   $('permission').checked=true;$('source-text').value=core.toTranscript(pack.cues);
   const doc=structuredClone(data.campaign);
-  $('campaign-json').value=JSON.stringify(doc,null,2);slideIndex=0;
+  $('campaign-json').value=JSON.stringify(doc,null,2);$('reply').value='';slideIndex=0;
   $('download-pack').disabled=false;$('copy-instructions').disabled=false;listEvidence();
   setStatus('source-status','Example loaded. It is fictional and written for this kit. It is not a customer result.','success');
-  applyValidation(doc,'Example loaded and structure check passed.');
+  applyValidation(doc,'Example loaded and it passes the check.');
+}
+// Make your own: clear the example and open step 1. If the customer has already started, just go back to step 1.
+function start(){
+  const started=!$('flow').hidden&&!exampleKey&&(pack||$('source-text').value.trim());
+  if(!started){
+    pack=null;campaign=null;campaignValid=false;exampleKey=null;lastErrors=[];slideIndex=0;
+    for(const id of ['brand','audience','voice','cta'])$(id).value=$(id).defaultValue;
+    $('source-text').value='';$('reply').value='';$('campaign-json').value='';$('permission').checked=false;
+    $('download-pack').disabled=true;$('copy-instructions').disabled=true;listEvidence();
+    setStatus('source-status','Paste a transcript to begin.');setStatus('validation-status','No reply checked yet.');
+    setExports();
+  }
+  $('flow').hidden=false;setStep(1,true);
+}
+function setStep(n,focus){
+  step=n;$('flow').dataset.step=String(n);
+  $('step-count').textContent='Step '+n+' of 3';
+  $('step-back').disabled=n===1;$('step-next').hidden=n===3;
+  if(focus){const h=$(['h-source','h-draft','h-review'][n-1]);h.focus({preventScroll:true});h.scrollIntoView({block:'start'});}
+}
+function nextStep(){
+  if(step===1){if(!pack)prepare();if(!pack)return;setStep(2,true);return;}
+  if(step===2){
+    if(!(campaign&&campaignValid)){
+      if(!($('reply').value.trim()||$('campaign-json').value.trim())){setStatus('validation-status','Paste Claude\'s reply first, then press Next.','error');return;}
+      validate();
+      if(!(campaign&&campaignValid))return;
+    }
+    setStep(3,true);
+  }
 }
 function claudeRequest(){
   return 'Use the Creator Publishing Kit skill that fits my source (webinar-to-campaign, lesson-to-carousel or product-demo-to-launch).\n'+
@@ -309,18 +262,18 @@ async function importText(input,target){
   $(target).value=text;input.value='';
   // A programmatic value change fires no input event, so revoke stale state explicitly.
   if(target==='source-text'){invalidateSource();setStatus('source-status','File loaded into this page only. Confirm you have the rights, then prepare the source.');}
-  else{invalidateDraft('Draft loaded from file. Validate it before review and export.');setStatus('validation-status','Draft loaded from file. Validate it before review and export.');}
+  else{invalidateDraft('Reply loaded from file. Press Check the reply.');setStatus('validation-status','Reply loaded from file. Press Check the reply.');}
 }
 // An export must match exactly the source and draft on screen. Any upstream change revokes approval.
 function invalidateDraft(message){
   if(!campaign&&!$('approval').checked)return;
-  campaign=null;campaignValid=false;$('approval').checked=false;slideIndex=0;setExports();
+  campaign=null;campaignValid=false;$('approval').checked=false;slideIndex=0;exampleKey=null;setExports();
   setStatus('validation-status',message);
 }
 function invalidateSource(){
   const wasPrepared=Boolean(pack);
   pack=null;$('download-pack').disabled=true;$('copy-instructions').disabled=true;
-  invalidateDraft('The source or brand details changed. Prepare the source again, then validate the draft.');
+  invalidateDraft('The source or brand details changed. Prepare the source again, then check the draft.');
   if(wasPrepared){listEvidence();setStatus('source-status','Something changed. Prepare the source again before drafting or approving.');}
   else refreshPreview();
 }
@@ -331,22 +284,60 @@ function editSlide(){
   s.eyebrow=$('edit-eyebrow').value;s.headline=$('edit-headline').value;s.body=$('edit-body').value;
   $('campaign-json').value=JSON.stringify(campaign,null,2);
   const keep=slideIndex;
-  applyValidation(campaign,'Edit saved and structure check passed. Approval was cleared because the draft changed.');
+  applyValidation(campaign,'Edit saved and the draft still passes the check. Approval was cleared because the draft changed.');
   slideIndex=keep;refreshPreview();
+}
+/* ---------- logo and cover photo: read here, drawn here, never uploaded or kept ---------- */
+const IMAGE_LIMITS={logo:{bytes:1000000,side:4000,name:'logo',mb:'1 MB'},photo:{bytes:10000000,side:8000,name:'photo',mb:'10 MB'}};
+function sniff(b){
+  if(b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47)return 'png';
+  if(b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF)return 'jpeg';
+  if(b[0]===0x52&&b[1]===0x49&&b[2]===0x46&&b[3]===0x46&&b[8]===0x57&&b[9]===0x45&&b[10]===0x42&&b[11]===0x50)return 'webp';
+  return null;
+}
+async function readImage(file,kind){
+  const lim=IMAGE_LIMITS[kind];
+  if(/svg/i.test(file.type)||/\.svgz?$/i.test(file.name))throw new Error('SVG files are not accepted. Use a PNG, JPEG or WebP image.');
+  if(file.size>lim.bytes)throw new Error('That '+lim.name+' is larger than '+lim.mb+', so it was not used.');
+  const type=sniff(new Uint8Array(await file.slice(0,12).arrayBuffer()));
+  if(!type)throw new Error('That file is not a PNG, JPEG or WebP image, so it was not used.');
+  let bmp;
+  try{bmp=await createImageBitmap(file);}catch(e){throw new Error('That image could not be read, so it was not used.');}
+  if(bmp.width>lim.side||bmp.height>lim.side){bmp.close&&bmp.close();throw new Error('That '+lim.name+' is wider or taller than '+lim.side+' pixels, so it was not used.');}
+  return bmp;
+}
+async function pickImage(kind){
+  const input=$(kind+'-file'),file=input.files&&input.files[0];input.value='';
+  if(!file)return;
+  $('look-status').hidden=false;
+  try{
+    const bmp=await readImage(file,kind);
+    if(kind==='logo')logo=bmp;else photo=bmp;
+    $(kind+'-remove').hidden=false;
+    setStatus('look-status',kind==='logo'?'Logo added to the foot of every slide. It stays in this page.':'Cover photo added to slide one. It stays in this page.','success');
+    if(kind==='photo')slideIndex=0;
+    refreshPreview();revealCarousel();
+  }catch(e){setStatus('look-status',e.message,'error');}
+}
+function removeImage(kind){
+  if(kind==='logo')logo=null;else photo=null;
+  $(kind+'-remove').hidden=true;$('look-status').hidden=true;refreshPreview();
 }
 function canvasBlob(canvas){return new Promise(resolve=>canvas.toBlob(resolve,'image/png'));}
 async function savePng(index){
-  const cv=document.createElement('canvas');
-  renderSlide(cv,campaign.slides[index],index,campaign.slides.length,renderOptions());
+  const cv=document.createElement('canvas'),v=view();
+  S.renderSlide(cv,campaign.slides[index],index,campaign.slides.length,renderOptions(v,index));
   const blob=await canvasBlob(cv);
   if(blob)download('carousel-slide-'+String(index+1).padStart(2,'0')+'.png',blob);
 }
 function buildPrintDeck(){
   const root=$('print-deck');root.replaceChildren();
+  const v=view(),story=$('size').value==='story';
+  root.classList.toggle('story',story);
   campaign.slides.forEach((s,i)=>{
-    const page=document.createElement('div');page.className='print-slide';
+    const page=document.createElement('div');page.className='print-slide'+(story?' story':'');
     const cv=document.createElement('canvas');
-    const runs=renderSlide(cv,s,i,campaign.slides.length,renderOptions());
+    const runs=S.renderSlide(cv,s,i,campaign.slides.length,renderOptions(v,i));
     page.appendChild(cv);
     // Invisible, selectable text laid exactly over the painted lines, so the saved PDF can be searched and read aloud.
     const layer=document.createElement('div');layer.className='print-text';
@@ -362,20 +353,25 @@ function buildPrintDeck(){
 
 /* ---------- wiring ---------- */
 for(const id of ['source-text','brand','audience','voice','cta'])$(id).addEventListener('input',invalidateSource);
-$('campaign-json').addEventListener('input',()=>invalidateDraft('The draft changed. Validate it again, then review and approve before export.'));
-$('prepare').addEventListener('click',prepare);$('validate').addEventListener('click',validate);
+$('reply').addEventListener('input',()=>invalidateDraft('Claude\'s reply changed. Check it, then review and approve before export.'));
+$('campaign-json').addEventListener('input',()=>invalidateDraft('The draft data changed. Check it again, then review and approve before export.'));
+$('prepare').addEventListener('click',prepare);$('validate').addEventListener('click',()=>validate(false));$('validate-data').addEventListener('click',()=>validate(true));
 $('source-file-button').addEventListener('click',()=>$('source-file').click());
 $('campaign-file-button').addEventListener('click',()=>$('campaign-file').click());
 $('source-file').addEventListener('change',()=>importText($('source-file'),'source-text'));
-$('campaign-file').addEventListener('change',()=>importText($('campaign-file'),'campaign-json'));
+$('campaign-file').addEventListener('change',()=>importText($('campaign-file'),'reply'));
 (function buildSamples(){
-  const box=$('sample-actions');const demos=window.CPK_DEMO||{};
-  for(const key of Object.keys(SAMPLE_LABELS)){
+  const box=$('sample-actions');
+  for(const key of Object.keys(EXAMPLES)){
     if(!demos[key])continue;
-    const b=document.createElement('button');b.type='button';b.className='button quiet';b.dataset.sample=key;b.textContent=SAMPLE_LABELS[key];
-    b.addEventListener('click',()=>sample(key));box.appendChild(b);
+    const b=document.createElement('button');b.type='button';b.className='button quiet';b.dataset.sample=key;b.textContent=EXAMPLES[key].label;
+    b.addEventListener('click',()=>{sample(key);revealCarousel();});box.appendChild(b);
   }
+  if(!box.children.length)box.parentElement.hidden=true;
 })();
+$('start').addEventListener('click',start);
+$('step-next').addEventListener('click',nextStep);
+$('step-back').addEventListener('click',()=>setStep(Math.max(1,step-1),true));
 $('download-pack').addEventListener('click',()=>pack&&download('creator-source-pack.json',JSON.stringify(pack,null,2),'application/json'));
 $('copy-instructions').addEventListener('click',()=>{
   if(!pack)return;
@@ -390,10 +386,28 @@ for(const m of ['slides','reels','posts'])$('mode-'+m).addEventListener('click',
   $('guide').appendChild(a);$('guide').hidden=false;
 })();
 $('approval').addEventListener('change',setExports);
-$('prev').addEventListener('click',()=>{slideIndex=Math.max(0,slideIndex-1);refreshPreview();});
-$('next').addEventListener('click',()=>{slideIndex=Math.min((campaign&&campaign.slides?campaign.slides.length:1)-1,slideIndex+1);refreshPreview();});
-$('theme').addEventListener('change',refreshPreview);
-$('show-sources').addEventListener('change',refreshPreview);
+$('prev').addEventListener('click',()=>go(-1));
+$('next').addEventListener('click',()=>go(1));
+// Swipe on the slide: a mostly sideways drag of 40 pixels or more turns the page. Arrow keys do the same.
+(function swipe(){
+  const cv=$('slide');let sx=null,sy=null;
+  cv.addEventListener('pointerdown',e=>{sx=e.clientX;sy=e.clientY;});
+  cv.addEventListener('pointerup',e=>{if(sx===null)return;const dx=e.clientX-sx,dy=e.clientY-sy;sx=null;if(Math.abs(dx)>=40&&Math.abs(dx)>Math.abs(dy))go(dx<0?1:-1);});
+  cv.addEventListener('pointercancel',()=>{sx=null;});
+  cv.addEventListener('keydown',e=>{if(e.key==='ArrowRight'){go(1);e.preventDefault();}else if(e.key==='ArrowLeft'){go(-1);e.preventDefault();}});
+})();
+if('IntersectionObserver' in window){
+  new IntersectionObserver(es=>{carouselSeen=es[0].intersectionRatio>0.5;if(carouselSeen)$('see-carousel').hidden=true;},{threshold:[0,0.5,1]}).observe($('slide'));
+}
+$('see-carousel').addEventListener('click',()=>{$('see-carousel').hidden=true;$('stage').scrollIntoView({block:'start'});$('slide').focus({preventScroll:true});});
+$('slide-layout').addEventListener('change',()=>{layouts[slideIndex]=$('slide-layout').value;refreshPreview();});
+for(const id of ['theme','size','show-sources'])$(id).addEventListener('change',refreshPreview);
+$('brand-colour').addEventListener('input',()=>{$('theme').value='brand';refreshPreview();});
+for(const kind of ['logo','photo']){
+  $(kind+'-button').addEventListener('click',()=>$(kind+'-file').click());
+  $(kind+'-file').addEventListener('change',()=>pickImage(kind));
+  $(kind+'-remove').addEventListener('click',()=>removeImage(kind));
+}
 for(const id of ['edit-eyebrow','edit-headline','edit-body'])$(id).addEventListener('input',editSlide);
 $('png').addEventListener('click',()=>{if(exportsAllowed())savePng(slideIndex);});
 $('png-all').addEventListener('click',async()=>{
@@ -404,6 +418,7 @@ $('export-json').addEventListener('click',()=>exportsAllowed()&&download('approv
 $('export-md').addEventListener('click',()=>exportsAllowed()&&download('publishing-assets.md',core.campaignAsMarkdown(campaign,pack),'text/markdown'));
 $('print-pdf').addEventListener('click',()=>{if(!exportsAllowed())return;buildPrintDeck();window.print();});
 // Test hook only: lets automated checks read what was painted. It exposes no data that is not already on the page.
-window.CPKWorkbench={renderSlide,THEMES,buildPrintDeck,state:()=>({hasPack:Boolean(pack),hasCampaign:Boolean(campaign),valid:campaignValid,slideIndex})};
-setExports();
+window.CPKWorkbench={renderSlide:S.renderSlide,THEMES:S.THEMES,buildPrintDeck,shapes:()=>lastRuns?lastRuns.shapes.map(x=>x.kind):[],state:()=>({hasPack:Boolean(pack),hasCampaign:Boolean(campaign),valid:campaignValid,slideIndex,step,example:exampleKey,layout:$('slide-layout').value,hasLogo:Boolean(logo),hasPhoto:Boolean(photo)})};
+// Result first: the first example this edition has, finished, with nothing to fill in.
+if(firstExample)sample(firstExample);else setExports();
 })();

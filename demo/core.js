@@ -157,6 +157,26 @@
     if(doc.slides?.length && doc.posts?.length)warnings.push('Machine checks validate cited cue IDs and timing, NOT semantic truth, copyright, visual claims or policy compliance. Human approval required.');
     return {ok:errors.length===0,errors,warnings};
   }
+  // Claude's reply may wrap the draft in a code fence or a sentence or two. Find the one object in it.
+  // Not part of validation: whatever this returns still goes through validateCampaign unchanged.
+  function extractDraft(text){
+    const src=String(text==null?'':text);
+    const found=[];let depth=0,start=-1,inString=false,escaped=false,cutOff=false;
+    for(let i=0;i<src.length;i++){
+      const ch=src[i];
+      if(depth>0&&inString){if(escaped)escaped=false;else if(ch==='\\')escaped=true;else if(ch==='"')inString=false;continue;}
+      if(depth>0&&ch==='"'){inString=true;continue;}
+      if(ch==='{'){if(depth===0)start=i;depth++;}
+      else if(ch==='}'&&depth>0){depth--;if(depth===0){try{const v=JSON.parse(src.slice(start,i+1));if(v&&typeof v==='object'&&!Array.isArray(v))found.push(v);}catch(e){/* braces in prose */}}}
+    }
+    if(depth>0)cutOff=true;
+    const drafts=found.filter(v=>'slides' in v||'schema_version' in v);
+    const pick=drafts.length?drafts:found;
+    if(pick.length===1)return {ok:true,value:pick[0],extra:src.trim()!==JSON.stringify(pick[0])&&!/^\s*\{[\s\S]*\}\s*$/.test(src)};
+    if(pick.length>1)return {ok:false,count:pick.length,error:'The reply contains '+pick.length+' separate drafts. Paste only the one you want to use.'};
+    if(cutOff)return {ok:false,count:0,error:'The draft in the reply looks cut off. Ask Claude to send the whole reply again.'};
+    return {ok:false,count:0,error:'No draft was found in the reply. Copy Claude\'s whole answer and paste it here again.'};
+  }
   function campaignAsMarkdown(doc,pack){
     const cueById=new Map(pack.cues.map(c=>[c.id,c]));
     const ref=ids=>ids.map(id=>{const c=cueById.get(id);return c?id+(c.start_ms!==null?' ('+displayTime(c.start_ms)+')':''):'UNKNOWN';}).join(', ');
@@ -167,5 +187,5 @@
     out.push('','## Human review required',...(doc.review_notes||[]).map(n=>'- '+n));
     return out.join('\n');
   }
-  return {parseTime,displayTime,parseTranscript,makePack,validateCampaign,campaignAsMarkdown,checksum,toTranscript,srtTime,citedBounds,sameWords,reelCopyText,postCopyText};
+  return {parseTime,displayTime,parseTranscript,makePack,validateCampaign,campaignAsMarkdown,checksum,toTranscript,srtTime,citedBounds,sameWords,reelCopyText,postCopyText,extractDraft};
 });
